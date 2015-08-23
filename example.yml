@@ -1,0 +1,11 @@
+---
+target:
+  host: "my.backup.host.com"
+  rsync_name: "some_rsync_module"
+excludes:
+  - "/.*"
+  - "/tmp"
+  - "/var"
+  - "/Volumes"
+source:
+  path: "/"

@@ -1,10 +1,13 @@
-from setuptools import setup, find_packages
+from setuptools import setup
 
 setup(
     name="rsyncbacker",
     version="0.0.1",
-    packages=find_packages(),
-    scripts=['scripts/rsyncbacker.py'],
+    packages=['rsyncbacker'],
+    scripts=['scripts/rsyncbacker_cmd.py'],
+    setup_requires=[
+        'nose'
+    ],
     install_requires=[
         'pyyaml'
     ],

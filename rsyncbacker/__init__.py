@@ -1,46 +1,10 @@
-__author__ = 'johan'
+from rsyncbacker.exception import ConfigurationException, BackupExecutionException
+from rsyncbacker.util import get_ipv4_addresses_on_host, is_host_on_lan
 
-import yaml
 import logging
 import subprocess
-import re
 
 LOGGER = logging.getLogger(__name__)
-
-
-def load_config(yml_file):
-    try:
-        return yaml.load(open(yml_file).read())
-    except IOError, ex:
-        LOGGER.error("Failed to load config file %s" % yml_file, ex)
-
-
-def get_ipv4_addresses_on_host():
-    rv = []
-    p = subprocess.Popen(['/usr/bin/env', 'ifconfig', '-a'], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         shell=False)
-    output = p.communicate()
-    if p.returncode != 0:
-        raise ConfigurationException("Failed to identify my local IP-addresses, output: %s" % output[1])
-
-    pattern = re.compile("^\s+inet ([0-9\.]+) netmask ([0-9]x[0-9a-f]+) broadcast ([0-9\.]+)$")
-    for line in output[0].splitlines():
-        result = re.match(pattern, line)
-        if result:
-            rv.append({
-                "ip": result.group(1),
-                "netmask": result.group(2),
-                "broadcast": result.group(3)
-            })
-    return rv
-
-
-class ConfigurationException(BaseException):
-    pass
-
-
-class BackupExecutionException(BaseException):
-    pass
 
 
 class RsyncExecutor(object):
@@ -61,18 +25,20 @@ class RsyncExecutor(object):
     def load_config(self, config):
         try:
             self.target_host = config["target"]["host"]
-        except KeyError, ex:
-            LOGGER.error("Must specify target.host")
-            raise ConfigurationException(ex)
+        except KeyError:
+            msg = "Must specify target.host"
+            LOGGER.error(msg)
+            raise ConfigurationException(msg)
 
         try:
             self.target_rsync_name = config["target"]["rsync_name"]
         except KeyError:
             try:
                 self.target_rsync_path = config["target"]["rsync_path"]
-            except KeyError, ex:
-                LOGGER.error("Neither target.rsync_name or target.rsync_path set")
-                raise ConfigurationException(ex)
+            except KeyError:
+                msg = "Neither target.rsync_name or target.rsync_path set"
+                LOGGER.error(msg)
+                raise ConfigurationException(msg)
 
         try:
             self.target_rsync_user = config["target"]["rsync"]["user"]
@@ -108,9 +74,10 @@ class RsyncExecutor(object):
 
         try:
             self.source_path = config["source"]["path"]
-        except KeyError, ex:
-            LOGGER.error("No source path set in source.path")
-            raise ConfigurationException(ex)
+        except KeyError:
+            msg = "No source path set in source.path"
+            LOGGER.error(msg)
+            raise ConfigurationException(msg)
 
     @staticmethod
     def _cmdline_builder_from_list(argument, collection):
@@ -120,7 +87,8 @@ class RsyncExecutor(object):
         return rv
 
     def should_backup_run(self):
-        pass
+        ifaces = get_ipv4_addresses_on_host()
+        return is_host_on_lan(self.target_host, ifaces)
 
     def commandline_builder(self):
         self.cmd_line = ['/usr/bin/env', 'rsync', '-a', '--delete']
