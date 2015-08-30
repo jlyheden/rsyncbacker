@@ -63,8 +63,9 @@ class FreeNAS(object):
 
     def delete_snapshots(self, snapshots, number_to_keep):
         if len(snapshots) < number_to_keep:
+            LOGGER.info("Only found %s snapshots so skipping house keeping" % len(snapshots))
             return
-        for snapshot in sorted(snapshots, key=lambda k: k["name"])[number_to_keep:]:
+        for snapshot in sorted(snapshots, key=lambda k: k["name"], reverse=True)[number_to_keep:]:
             self._delete("/api/v1.0/storage/snapshot/%s/" % snapshot["fullname"])
 
     def create_snapshot(self, filesystem):
@@ -90,6 +91,6 @@ config = yaml.load(open(args.config).read())
 freenas_api = FreeNAS(config["host"], config["username"], config["password"])
 freenas_api.create_snapshot(args.filesystem)
 all_snapshots = freenas_api.get_all_fs_snapshots(args.filesystem)
-freenas_api.delete_snapshots(all_snapshots, args.number_to_keep)
+freenas_api.delete_snapshots(all_snapshots, int(args.number_to_keep))
 
 LOGGER.info("Done")
