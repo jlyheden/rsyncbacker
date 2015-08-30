@@ -7,3 +7,11 @@ class ConfigurationException(BaseException):
 
 class BackupExecutionException(BaseException):
     pass
+
+
+class ImageManagerException(BaseException):
+    pass
+
+
+class MountAfpException(BaseException):
+    pass

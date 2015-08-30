@@ -1,4 +1,6 @@
 from rsyncbacker.exception import ConfigurationException, BackupExecutionException
+from rsyncbacker.hdiutil import ImageManager
+from rsyncbacker.mount import MountAfp
 from rsyncbacker.util import get_ipv4_addresses_on_host, is_host_on_lan
 
 import logging
@@ -11,56 +13,33 @@ class RsyncExecutor(object):
 
     def __init__(self):
         self.target_host = None
-        self.target_rsync_name = None
-        self.target_rsync_path = None
-        self.target_rsync_user = None
-        self.target_use_ssh = False
-        self.target_ssh_key = None
-        self.target_ssh_user = None
+        self.target_share = None
+        self.target_username = None
+        self.target_password = None
+        self.target_passphrase = None
+        self.target_image_size = None
+        self.target_local_destination = "/Volumes/backupvol"
+        self.target_image_loc = None
         self.excludes = []
         self.includes = []
         self.source_path = None
         self.cmd_line = []
 
+        self.mounter = None
+        self.backup_image = None
+
     def load_config(self, config):
         try:
             self.target_host = config["target"]["host"]
-        except KeyError:
-            msg = "Must specify target.host"
+            self.target_share = config["target"]["share"]
+            self.target_username = config["target"]["username"]
+            self.target_password = config["target"]["password"]
+            self.target_passphrase = config["target"]["passphrase"]
+            self.target_image_size = config["target"]["image_size"]
+        except KeyError, ex:
+            msg = "Incomplete target configuration %s" % ex.message
             LOGGER.error(msg)
             raise ConfigurationException(msg)
-
-        try:
-            self.target_rsync_name = config["target"]["rsync_name"]
-        except KeyError:
-            try:
-                self.target_rsync_path = config["target"]["rsync_path"]
-            except KeyError:
-                msg = "Neither target.rsync_name or target.rsync_path set"
-                LOGGER.error(msg)
-                raise ConfigurationException(msg)
-
-        try:
-            self.target_rsync_user = config["target"]["rsync"]["user"]
-        except KeyError:
-            LOGGER.info("No user set in target.rsync_user, will use defaults")
-
-        try:
-            self.target_use_ssh = config["target"]["use_ssh"]
-            if self.target_use_ssh not in [True, False]:
-                raise ConfigurationException("Setting target.use_ssh must be a boolean")
-        except KeyError:
-            LOGGER.info("No setting for target.use_ssh, using default False")
-
-        if self.target_use_ssh:
-            try:
-                self.target_ssh_user = config["target"]["ssh_user"]
-            except KeyError:
-                LOGGER.info("No setting for target.ssh_user, using your currently logged in user")
-            try:
-                self.target_ssh_key = config["target"]["ssh_key"]
-            except KeyError:
-                LOGGER.info("No setting for target.ssh_key, taking no responsibility for that setting")
 
         try:
             self.excludes = config["excludes"]
@@ -79,6 +58,31 @@ class RsyncExecutor(object):
             LOGGER.error(msg)
             raise ConfigurationException(msg)
 
+        self.mounter = MountAfp(self.target_host, self.target_share, self.target_username, self.target_password)
+        self.target_image_loc = "%s/backupvol" % self.mounter.mount_point
+        self.backup_image = ImageManager(self.target_passphrase, self.target_image_loc, self.target_local_destination)
+
+    def set_up(self):
+        if not self.mounter.is_mounted():
+            LOGGER.info("Mounting fileshare on backup server")
+            self.mounter.mount()
+
+        if not self.backup_image.image_exists():
+            LOGGER.info("Sparsebundle image on backup server doesnt exist, creating it")
+            self.backup_image.create_image()
+        elif not self.backup_image.is_mounted():
+            LOGGER.info("Mounting sparsebundle image")
+            self.backup_image.mount_image()
+
+    def tear_down(self):
+        if self.backup_image.is_mounted():
+            LOGGER.info("Unmounting sparsebundle image")
+            self.backup_image.unmount_image()
+
+        if self.mounter.is_mounted():
+            LOGGER.info("Unmounting fileshare on backup server")
+            self.mounter.umount()
+
     @staticmethod
     def _cmdline_builder_from_list(argument, collection):
         rv = []
@@ -91,37 +95,21 @@ class RsyncExecutor(object):
         return is_host_on_lan(self.target_host, ifaces)
 
     def commandline_builder(self):
-        self.cmd_line = ['/usr/bin/env', 'rsync', '-a', '--delete']
+        # removed --delete just in case i screwed up
+        self.cmd_line = ['/usr/bin/env', 'rsync', '-av']
         [self.cmd_line.append(x) for x in self._cmdline_builder_from_list("--exclude", self.excludes)]
         [self.cmd_line.append(x) for x in self._cmdline_builder_from_list("--include", self.includes)]
 
-        if self.target_use_ssh:
-            self.cmd_line.append("-e")
-            ssh_cmd = "ssh"
-            if self.target_ssh_key is not None:
-                ssh_cmd = "%s -i %s" % (ssh_cmd, self.target_ssh_key)
-            if self.target_ssh_user is not None:
-                ssh_cmd = "%s -l %s" % (ssh_cmd, self.target_ssh_user)
-            self.cmd_line.append("\"%s\"" % ssh_cmd)
-
         self.cmd_line.append(self.source_path)
-
-        if self.target_rsync_name is not None:
-            destination = "::%s" % self.target_rsync_name
-        else:
-            destination = ":%s" % self.target_rsync_path
-
-        if self.target_rsync_user is not None:
-            destination = "%s@%s%s" % (self.target_rsync_user, self.target_host, destination)
-            self.cmd_line.append(destination)
-        else:
-            destination = "%s%s" % (self.target_host, destination)
-            self.cmd_line.append(destination)
+        self.cmd_line.append(self.target_local_destination)
 
     def execute_backup(self):
-        proc = subprocess.Popen(self.cmd_line, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
-        for line in proc.stdout:
-            LOGGER.info(line)
+        stderr = None
+        proc = subprocess.Popen(self.cmd_line, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1, shell=False)
+        while proc.returncode is None:
+            (stdout, stderr) = proc.communicate()
+            for line in stdout.splitlines():
+                LOGGER.info("rsync: %s" % line)
         if proc.returncode != 0:
-            raise BackupExecutionException("Backup command failed to execute")
+            raise BackupExecutionException("Backup command failed to execute: %s" % stderr)
 

@@ -1,7 +1,11 @@
 ---
 target:
   host: "my.backup.host.com"
-  rsync_name: "some_rsync_module"
+  share: ""
+  username: "blah"
+  password: "blah"
+  passphrase: "foobar"
+  image_size: "500G"
 excludes:
   - "/.*"
   - "/tmp"
