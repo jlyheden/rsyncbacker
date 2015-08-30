@@ -27,6 +27,7 @@ class RsyncExecutor(object):
 
         self.mounter = None
         self.backup_image = None
+        self.post_hook = None
 
     def load_config(self, config):
         try:
@@ -57,6 +58,11 @@ class RsyncExecutor(object):
             msg = "No source path set in source.path"
             LOGGER.error(msg)
             raise ConfigurationException(msg)
+
+        try:
+            self.post_hook = config["post_hook"].split(" ")
+        except Exception:
+            LOGGER.info("No post_hook configured")
 
         self.mounter = MountAfp(self.target_host, self.target_share, self.target_username, self.target_password)
         self.target_image_loc = "%s/backupvol" % self.mounter.mount_point
@@ -113,3 +119,11 @@ class RsyncExecutor(object):
         if proc.returncode != 0:
             raise BackupExecutionException("Backup command failed to execute: %s" % stderr)
 
+    def post_execute(self):
+        if self.post_hook is None:
+            return
+        p = subprocess.Popen(self.post_hook, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+        output = p.communicate()
+        if p.returncode != 0:
+            raise BackupExecutionException("Post hook failed to execute, output: %s" % output[1])
+        return None

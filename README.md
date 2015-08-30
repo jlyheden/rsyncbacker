@@ -38,11 +38,11 @@ this will
 * check if image exists on share and create if not
 * mount the image (if not mounted)
 * run backup
+* execute post hook (if any configured)
 * umount image
 * umount afp share
 
 # todo
 
 * rsync output isnt streamed to the script, would be nice to have continuous logging while backing up
-* no post hook (snapshots)
 * tests are 100% inaccurate and broken

@@ -13,3 +13,4 @@ excludes:
   - "/Volumes"
 source:
   path: "/"
+post_hook: "freenas_snapshot.py -n 30 path/to/config volume1/mybackupvol"
