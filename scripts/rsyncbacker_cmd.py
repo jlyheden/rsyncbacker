@@ -40,7 +40,7 @@ try:
     executor.load_config(config)
     executor.commandline_builder()
 except ConfigurationException, ex:
-    LOGGER.error(ex)
+    LOGGER.exception("Failed to parse configuration")
     sys.exit(1)
 
 if not args.ignore_lan_check and executor.should_backup_run() is False:
@@ -51,7 +51,7 @@ if not args.ignore_lan_check and executor.should_backup_run() is False:
 try:
     executor.set_up()
 except Exception, ex:
-    LOGGER.error("Failed to set up, exception %s" % ex.message)
+    LOGGER.exception("Failed to set up")
     sys.exit(1)
 
 try:
@@ -59,15 +59,16 @@ try:
     executor.execute_backup()
 except Exception, ex:
     LOGGER.exception("Backup execution failed")
-else:
-    try:
-        executor.post_execute()
-    except BackupExecutionException, ex:
-        LOGGER.warning("Failed to execute post hook %s" % ex)
-finally:
     if not args.no_cleanup:
         try:
             executor.tear_down()
         except Exception, ex:
-            LOGGER.error("Failed to tear down, exception %s" % ex.message)
+            LOGGER.exception("Failed to tear down")
             sys.exit(1)
+else:
+    try:
+        executor.tear_down()
+        executor.post_execute()
+    except BackupExecutionException, ex:
+        LOGGER.exception("Failed to execute tear_down / post hook")
+        sys.exit(1)

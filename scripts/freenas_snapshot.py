@@ -31,6 +31,7 @@ class FreeNAS(object):
         self.host = host
         self.username = username
         self.password = password
+        self.suffix = "_rsyncbacker"
 
     def _get(self, path):
         req = requests.get("http://%s%s" % (self.host, path), auth=(self.username, self.password))
@@ -54,7 +55,8 @@ class FreeNAS(object):
         snapshots = []
         while True:
             response = self._get("/api/v1.0/storage/snapshot/?offset=%s&limit=%s" % (offset, limit))
-            snapshots.extend([x for x in response if x["filesystem"] == filesystem])
+            snapshots.extend([x for x in response if x["filesystem"] == filesystem
+                              and x["fullname"].endswith(self.suffix)])
             if len(response) < limit:
                 break
             else:
@@ -71,7 +73,7 @@ class FreeNAS(object):
     def create_snapshot(self, filesystem):
         data = {
             "dataset": filesystem,
-            "name": datetime.datetime.now().strftime("%Y%m%d_%H%M%S_rsyncbacker")
+            "name": "%s%s" % (datetime.datetime.now().strftime("%Y%m%d_%H%M%S"), self.suffix)
         }
         headers = {
             "Content-Type": "application/json"

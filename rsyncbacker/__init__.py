@@ -5,7 +5,6 @@ from rsyncbacker.util import get_ipv4_addresses_on_host, is_host_on_lan
 
 import logging
 import subprocess
-import sys
 from threading import Thread
 from Queue import Queue, Empty
 
@@ -25,6 +24,7 @@ class RsyncExecutor(object):
         self.target_image_loc = None
         self.excludes = []
         self.includes = []
+        self.rsync_verbose = False
         self.source_path = None
         self.cmd_line = []
 
@@ -46,14 +46,19 @@ class RsyncExecutor(object):
             raise ConfigurationException(msg)
 
         try:
-            self.excludes = config["excludes"]
+            self.excludes = config["rsync"]["excludes"]
         except KeyError:
             LOGGER.info("No excludes set in excludes")
 
         try:
-            self.includes = config["includes"]
+            self.includes = config["rsync"]["includes"]
         except KeyError:
             LOGGER.info("No includes set in includes")
+
+        try:
+            self.rsync_verbose = config["rsync"]["verbose"]
+        except KeyError:
+            pass
 
         try:
             self.source_path = config["source"]["path"]
@@ -104,8 +109,10 @@ class RsyncExecutor(object):
         return is_host_on_lan(self.target_host, ifaces)
 
     def commandline_builder(self):
-        # removed --delete just in case i screwed up
-        self.cmd_line = ['/usr/bin/env', 'rsync', '-av']
+        self.cmd_line = ['/usr/bin/env', 'rsync', '-a']
+        if self.rsync_verbose:
+            self.cmd_line.append("-v")
+        self.cmd_line.append("--delete")
         [self.cmd_line.append(x) for x in self._cmdline_builder_from_list("--exclude", self.excludes)]
         [self.cmd_line.append(x) for x in self._cmdline_builder_from_list("--include", self.includes)]
 
@@ -117,6 +124,15 @@ class RsyncExecutor(object):
             for line in iter(out.readline, b''):
                 queue.put(line)
             out.close()
+
+        def get_stderr(out):
+            response = []
+            for line in iter(out.readline, b''):
+                if line == "":
+                    break
+                response.append(line)
+            out.close()
+            return "\n".join(response)
 
         proc = subprocess.Popen(self.cmd_line, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1,
                                 close_fds=True, shell=False)
@@ -132,8 +148,14 @@ class RsyncExecutor(object):
             except Empty:
                 pass
 
-        if proc.returncode != 0:
-            raise BackupExecutionException("Backup command failed to execute: %s" % proc.stderr)
+        if proc.returncode == 23:
+            LOGGER.warning("Some files failed to transfer correctly, output from rsync: %s" % get_stderr(proc.stderr))
+        elif proc.returncode == 0:
+            LOGGER.info("Rsync completed successfully")
+        else:
+            LOGGER.error("Rsync failed")
+            raise BackupExecutionException("Backup command failed (%s) to execute: %s" % (proc.returncode,
+                                                                                          get_stderr(proc.stderr)))
 
     def post_execute(self):
         if self.post_hook is None:
