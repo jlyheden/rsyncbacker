@@ -44,5 +44,4 @@ this will
 
 # todo
 
-* rsync output isnt streamed to the script, would be nice to have continuous logging while backing up
 * tests are 100% inaccurate and broken

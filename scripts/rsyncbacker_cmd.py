@@ -58,7 +58,7 @@ try:
     LOGGER.debug("Will execute %s" % " ".join(executor.cmd_line))
     executor.execute_backup()
 except Exception, ex:
-    LOGGER.error("Backup execution failed, exception %s" % ex.message)
+    LOGGER.exception("Backup execution failed")
 else:
     try:
         executor.post_execute()

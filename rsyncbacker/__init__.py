@@ -5,6 +5,9 @@ from rsyncbacker.util import get_ipv4_addresses_on_host, is_host_on_lan
 
 import logging
 import subprocess
+import sys
+from threading import Thread
+from Queue import Queue, Empty
 
 LOGGER = logging.getLogger(__name__)
 
@@ -110,14 +113,27 @@ class RsyncExecutor(object):
         self.cmd_line.append(self.target_local_destination)
 
     def execute_backup(self):
-        stderr = None
-        proc = subprocess.Popen(self.cmd_line, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1, shell=False)
-        while proc.returncode is None:
-            (stdout, stderr) = proc.communicate()
-            for line in stdout.splitlines():
-                LOGGER.info("rsync: %s" % line)
+        def enqueue_output(out, queue):
+            for line in iter(out.readline, b''):
+                queue.put(line)
+            out.close()
+
+        proc = subprocess.Popen(self.cmd_line, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1,
+                                close_fds=True, shell=False)
+        q = Queue()
+        t = Thread(target=enqueue_output, args=(proc.stdout, q))
+        t.daemon = True
+        t.start()
+
+        while proc.poll() is None:
+            try:
+                rsync_line = q.get(timeout=1)
+                LOGGER.info("rsync: %s" % rsync_line.strip())
+            except Empty:
+                pass
+
         if proc.returncode != 0:
-            raise BackupExecutionException("Backup command failed to execute: %s" % stderr)
+            raise BackupExecutionException("Backup command failed to execute: %s" % proc.stderr)
 
     def post_execute(self):
         if self.post_hook is None:
